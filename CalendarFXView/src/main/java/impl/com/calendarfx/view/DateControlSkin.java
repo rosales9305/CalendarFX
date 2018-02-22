@@ -16,6 +16,15 @@
 
 package impl.com.calendarfx.view;
 
+import static com.calendarfx.model.CalendarEvent.CALENDAR_CHANGED;
+import static javafx.scene.input.MouseEvent.MOUSE_PRESSED;
+
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.util.logging.Level;
+
 import com.calendarfx.model.Calendar;
 import com.calendarfx.model.CalendarEvent;
 import com.calendarfx.model.Entry;
@@ -24,6 +33,7 @@ import com.calendarfx.util.CalendarFX;
 import com.calendarfx.util.LoggingDomain;
 import com.calendarfx.view.DateControl;
 import com.calendarfx.view.DraggedEntry;
+
 import impl.com.calendarfx.view.util.Util;
 import javafx.beans.InvalidationListener;
 import javafx.collections.ListChangeListener.Change;
@@ -33,176 +43,188 @@ import javafx.event.EventHandler;
 import javafx.event.EventType;
 import javafx.scene.control.SkinBase;
 
-import java.time.LocalDate;
-import java.time.LocalTime;
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
-import java.util.logging.Level;
-
-import static com.calendarfx.model.CalendarEvent.CALENDAR_CHANGED;
-import static javafx.scene.input.MouseEvent.MOUSE_PRESSED;
-
 public abstract class DateControlSkin<C extends DateControl> extends SkinBase<C> {
 
-    public DateControlSkin(C control) {
-        super(control);
+  public DateControlSkin(C control) {
+    super(control);
 
-        control.addEventHandler(MOUSE_PRESSED, evt -> control.clearSelection());
+    control.addEventHandler(MOUSE_PRESSED, evt -> control.clearSelection());
 
-        control.getCalendars().addListener(this::calendarListChanged);
+    control.getCalendars()
+        .addListener(this::calendarListChanged);
 
-        for (Calendar calendar : control.getCalendars()) {
-            calendar.addEventHandler(calendarListener);
+    for (Calendar calendar : control.getCalendars()) {
+      calendar.addEventHandler(calendarListener);
+    }
+
+    MapChangeListener<? super Object, ? super Object> propertiesListener = change -> {
+      if (change.wasAdded()) {
+        if (change.getKey()
+            .equals("refresh.data")) {
+          LoggingDomain.VIEW.fine("data refresh was requested by the application");
+          control.getProperties()
+              .remove("refresh.data");
+          refreshData();
         }
+      }
+    };
 
-        MapChangeListener<? super Object, ? super Object> propertiesListener = change -> {
+    control.getProperties()
+        .addListener(propertiesListener);
+
+    InvalidationListener calendarVisibilityListener = it -> calendarVisibilityChanged();
+
+    for (Calendar calendar : control.getCalendars()) {
+      control.getCalendarVisibilityProperty(calendar)
+          .addListener(calendarVisibilityListener);
+    }
+
+    control.getCalendars()
+        .addListener((Change<? extends Calendar> change) -> {
+          while (change.next()) {
             if (change.wasAdded()) {
-                if (change.getKey().equals("refresh.data")) {
-                    LoggingDomain.VIEW.fine("data refresh was requested by the application");
-                    control.getProperties().remove("refresh.data");
-                    refreshData();
-                }
+              for (Calendar calendar : change.getAddedSubList()) {
+                control.getCalendarVisibilityProperty(calendar)
+                    .addListener(calendarVisibilityListener);
+              }
             }
-        };
-
-        control.getProperties().addListener(propertiesListener);
-
-        InvalidationListener calendarVisibilityListener = it -> calendarVisibilityChanged();
-
-        for (Calendar calendar : control.getCalendars()) {
-            control.getCalendarVisibilityProperty(calendar).addListener(calendarVisibilityListener);
-        }
-
-        control.getCalendars().addListener((Change<? extends Calendar> change) -> {
-            while (change.next()) {
-                if (change.wasAdded()) {
-                    for (Calendar calendar : change.getAddedSubList()) {
-                        control.getCalendarVisibilityProperty(calendar).addListener(calendarVisibilityListener);
-                    }
-                } else if (change.wasRemoved()) {
-                    for (Calendar calendar : change.getRemoved()) {
-                        control.getCalendarVisibilityProperty(calendar).removeListener(calendarVisibilityListener);
-                    }
-                }
+            else if (change.wasRemoved()) {
+              for (Calendar calendar : change.getRemoved()) {
+                control.getCalendarVisibilityProperty(calendar)
+                    .removeListener(calendarVisibilityListener);
+              }
             }
+          }
         });
 
-        showInfo();
-    }
+    showInfo();
+  }
 
-    protected void refreshData() {
-    }
+  protected void refreshData() {
+  }
 
-    private InvalidationListener calendarVisibilityChanged = it -> calendarVisibilityChanged();
+  private InvalidationListener calendarVisibilityChanged = it -> calendarVisibilityChanged();
 
-    protected void calendarVisibilityChanged() {
-    }
+  protected void calendarVisibilityChanged() {
+  }
 
-    private EventHandler<CalendarEvent> calendarListener = this::calendarChanged;
+  private EventHandler<CalendarEvent> calendarListener = this::calendarChanged;
 
-    private void calendarListChanged(Change<? extends Calendar> change) {
-        C dateControl = getSkinnable();
-        while (change.next()) {
-            if (change.wasAdded()) {
-                for (Calendar calendar : change.getAddedSubList()) {
-                    calendar.addEventHandler(calendarListener);
-                    dateControl.getCalendarVisibilityProperty(calendar).addListener(calendarVisibilityChanged);
-                }
-            } else if (change.wasRemoved()) {
-                for (Calendar calendar : change.getRemoved()) {
-                    calendar.removeEventHandler(calendarListener);
-                    dateControl.getCalendarVisibilityProperty(calendar).removeListener(calendarVisibilityChanged);
-                }
-            }
+  private void calendarListChanged(Change<? extends Calendar> change) {
+    C dateControl = getSkinnable();
+    while (change.next()) {
+      if (change.wasAdded()) {
+        for (Calendar calendar : change.getAddedSubList()) {
+          calendar.addEventHandler(calendarListener);
+          dateControl.getCalendarVisibilityProperty(calendar)
+              .addListener(calendarVisibilityChanged);
         }
-    }
-
-    private void calendarChanged(CalendarEvent evt) {
-
-        if (LoggingDomain.EVENTS.isLoggable(Level.FINE) && !(evt.getEntry() instanceof DraggedEntry)) {
-            LoggingDomain.EVENTS.fine("calendar event in " + getSkinnable().getClass().getSimpleName() + ": " + evt.getEventType() + ", details: " + evt.toString());
+      }
+      else if (change.wasRemoved()) {
+        for (Calendar calendar : change.getRemoved()) {
+          calendar.removeEventHandler(calendarListener);
+          dateControl.getCalendarVisibilityProperty(calendar)
+              .removeListener(calendarVisibilityChanged);
         }
+      }
+    }
+  }
 
-        if (getSkinnable().isSuspendUpdates()) {
-            return;
-        }
+  private void calendarChanged(CalendarEvent evt) {
 
-        if (evt.getEventType().getSuperType().equals(CalendarEvent.ENTRY_CHANGED) && evt.getEntry().isRecurrence()) {
-            return;
-        }
-
-        Util.runInFXThread(() -> {
-            EventType<? extends Event> eventType = evt.getEventType();
-            if (eventType.equals(CalendarEvent.ENTRY_INTERVAL_CHANGED)) {
-                entryIntervalChanged(evt);
-            } else if (eventType.equals(CalendarEvent.ENTRY_FULL_DAY_CHANGED)) {
-                entryFullDayChanged(evt);
-            } else if (eventType.equals(CalendarEvent.ENTRY_RECURRENCE_RULE_CHANGED)) {
-                entryRecurrenceRuleChanged(evt);
-            } else if (eventType.equals(CalendarEvent.ENTRY_CALENDAR_CHANGED)) {
-                entryCalendarChanged(evt);
-            } else if (eventType.equals(CALENDAR_CHANGED)) {
-                calendarChanged(evt.getCalendar());
-            }
-        });
+    if (LoggingDomain.EVENTS.isLoggable(Level.FINE) && !(evt.getEntry() instanceof DraggedEntry)) {
+      LoggingDomain.EVENTS.fine("calendar event in " + getSkinnable().getClass()
+          .getSimpleName() + ": " + evt.getEventType() + ", details: " + evt.toString());
     }
 
-    protected void entryIntervalChanged(CalendarEvent evt) {
+    if (getSkinnable().isSuspendUpdates()) {
+      return;
     }
 
-    protected void entryFullDayChanged(CalendarEvent evt) {
+    if (evt.getEventType()
+        .getSuperType()
+        .equals(CalendarEvent.ENTRY_CHANGED)
+        && evt.getEntry()
+            .isRecurrence()) {
+      return;
     }
 
-    protected void entryRecurrenceRuleChanged(CalendarEvent evt) {
-    }
+    Util.runInFXThread(() -> {
+      EventType<? extends Event> eventType = evt.getEventType();
+      if (eventType.equals(CalendarEvent.ENTRY_INTERVAL_CHANGED)) {
+        entryIntervalChanged(evt);
+      }
+      else if (eventType.equals(CalendarEvent.ENTRY_FULL_DAY_CHANGED)) {
+        entryFullDayChanged(evt);
+      }
+      else if (eventType.equals(CalendarEvent.ENTRY_RECURRENCE_RULE_CHANGED)) {
+        entryRecurrenceRuleChanged(evt);
+      }
+      else if (eventType.equals(CalendarEvent.ENTRY_CALENDAR_CHANGED)) {
+        entryCalendarChanged(evt);
+      }
+      else if (eventType.equals(CALENDAR_CHANGED)) {
+        calendarChanged(evt.getCalendar());
+      }
+    });
+  }
 
-    protected void entryCalendarChanged(CalendarEvent evt) {
-    }
+  protected void entryIntervalChanged(CalendarEvent evt) {
+  }
 
-    protected void calendarChanged(Calendar calendar) {
-    }
+  protected void entryFullDayChanged(CalendarEvent evt) {
+  }
 
-    protected boolean isRelevant(Entry<?> entry) {
+  protected void entryRecurrenceRuleChanged(CalendarEvent evt) {
+  }
 
-        if (this instanceof LoadDataSettingsProvider) {
-            C dateControl = getSkinnable();
+  protected void entryCalendarChanged(CalendarEvent evt) {
+  }
 
-            if (!(entry instanceof DraggedEntry) && !dateControl.isCalendarVisible(entry.getCalendar())) {
-                return false;
-            }
+  protected void calendarChanged(Calendar calendar) {
+  }
 
-            LoadDataSettingsProvider provider = (LoadDataSettingsProvider) this;
+  protected boolean isRelevant(Entry<?> entry) {
 
-            ZoneId zoneId = getSkinnable().getZoneId();
-            LocalDate loadStartDate = provider.getLoadStartDate();
-            LocalDate loadEndDate = provider.getLoadEndDate();
+    if (this instanceof LoadDataSettingsProvider) {
+      C dateControl = getSkinnable();
 
-            return entry.isShowing(loadStartDate, loadEndDate, zoneId);
-        }
-
+      if (!(entry instanceof DraggedEntry) && !dateControl.isCalendarVisible(entry.getCalendar())) {
         return false;
+      }
+
+      LoadDataSettingsProvider provider = (LoadDataSettingsProvider) this;
+
+      ZoneId zoneId = getSkinnable().getZoneId();
+      LocalDate loadStartDate = provider.getLoadStartDate();
+      LocalDate loadEndDate = provider.getLoadEndDate();
+
+      return entry.isShowing(loadStartDate, loadEndDate, zoneId);
     }
 
-    protected boolean isRelevant(Interval interval) {
-        LoadDataSettingsProvider provider = (LoadDataSettingsProvider) this;
-        ZoneId zoneId = getSkinnable().getZoneId();
-        LocalDate loadStartDate = provider.getLoadStartDate();
-        LocalDate loadEndDate = provider.getLoadEndDate();
-        ZonedDateTime st = ZonedDateTime.of(loadStartDate, LocalTime.MIN, zoneId);
-        ZonedDateTime et = ZonedDateTime.of(loadEndDate, LocalTime.MAX, zoneId);
-        return Util.intersect(interval.getStartZonedDateTime(), interval.getEndZonedDateTime(), st, et);
+    return false;
+  }
+
+  protected boolean isRelevant(Interval interval) {
+    LoadDataSettingsProvider provider = (LoadDataSettingsProvider) this;
+    ZoneId zoneId = getSkinnable().getZoneId();
+    LocalDate loadStartDate = provider.getLoadStartDate();
+    LocalDate loadEndDate = provider.getLoadEndDate();
+    ZonedDateTime st = ZonedDateTime.of(loadStartDate, LocalTime.MIN, zoneId);
+    ZonedDateTime et = ZonedDateTime.of(loadEndDate, LocalTime.MAX, zoneId);
+    return Util.intersect(interval.getStartZonedDateTime(), interval.getEndZonedDateTime(), st, et);
+  }
+
+  public boolean infoShown = true;
+
+  private synchronized void showInfo() {
+    if (!infoShown) {
+      infoShown = true;
+
+      System.out.println("CalendarFX user interface framework for Java");
+      System.out.println("(c) 2014 - 2018 DLSC Software & Consulting");
+      System.out.println("Version: " + CalendarFX.getVersion());
+      System.out.println("Website: http://www.dlsc.com");
     }
-
-    private static boolean infoShown;
-
-    private synchronized void showInfo() {
-        if (!infoShown) {
-            infoShown = true;
-
-            System.out.println("CalendarFX user interface framework for Java");
-            System.out.println("(c) 2014 - 2018 DLSC Software & Consulting");
-            System.out.println("Version: " + CalendarFX.getVersion());
-            System.out.println("Website: http://www.dlsc.com");
-        }
-    }
+  }
 }
